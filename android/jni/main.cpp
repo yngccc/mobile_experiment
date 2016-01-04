@@ -22,67 +22,90 @@
 
 #include "../../shared.cpp"
 
-static int init_opengl_es(Program* program) {
-  const EGLint attribs[] = {
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, // this doesn't really prohibit creating 3.0 context?
-    EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-    EGL_BLUE_SIZE, 8,
-    EGL_GREEN_SIZE, 8,
-    EGL_RED_SIZE, 8,
-    EGL_NONE
-  };
-  const EGLint context_attrib[] = {
-    EGL_CONTEXT_CLIENT_VERSION, 3,
-    EGL_NONE
-  };
-  EGLint format;
-  EGLint numConfigs;
-  EGLConfig config;
-  EGLSurface surface;
-  EGLContext context;
+static bool init_opengl_es_display(Program *program) {
   EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-  eglInitialize(display, nullptr, nullptr);
-  eglChooseConfig(display, attribs, &config, 1, &numConfigs);
-  eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
+  if (display == EGL_NO_DISPLAY) {
+    LOGW("cannot eglGetDisplay");
+    return false;
+  }
+  if (eglInitialize(display, nullptr, nullptr) == EGL_FALSE) {
+    LOGW("cannot eglInitialize");
+    return false;
+  }
+  EGLint display_attribs[] = { EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8, EGL_NONE };
+  EGLConfig display_config;
+  EGLint num_config;
+  eglChooseConfig(display, display_attribs, &display_config, 1, &num_config);
+  EGLint format;
+  eglGetConfigAttrib(display, display_config, EGL_NATIVE_VISUAL_ID, &format);
   ANativeWindow_setBuffersGeometry(program->app->window, 0, 0, format);
-  surface = eglCreateWindowSurface(display, config, program->app->window, nullptr);
-  context = eglCreateContext(display, config, nullptr, context_attrib);
-  if (!context) {
-    LOGW("Unable to create OpenGL ES 3.0 context");
-    return -1;
-  }
-  if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE) {
-    LOGW("Unable to eglMakeCurrent");
-    return -1;
-  }
   program->opengl_es.display = display;
-  program->opengl_es.context = context;
-  program->opengl_es.surface = surface;
-  eglQuerySurface(display, surface, EGL_WIDTH, &program->opengl_es.surface_width);
-  eglQuerySurface(display, surface, EGL_HEIGHT, &program->opengl_es.surface_height);
-
-  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
-  eglSwapBuffers(program->opengl_es.display, program->opengl_es.surface);
-
-  return 0;
+  program->opengl_es.display_config = display_config;
+  return true;
 }
 
-static void shutdown_opengl_es(Program* program) {
-  auto *gl = &program->opengl_es;
-  if (gl->display != EGL_NO_DISPLAY) {
-    eglMakeCurrent(gl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    if (gl->context != EGL_NO_CONTEXT) {
-      eglDestroyContext(gl->display, gl->context);
-    }
-    if (gl->surface != EGL_NO_SURFACE) {
-      eglDestroySurface(gl->display, gl->surface);
-    }
-    eglTerminate(gl->display);
+static bool init_opengl_es_surface(Program* program) {
+  EGLSurface surface = eglCreateWindowSurface(program->opengl_es.display, program->opengl_es.display_config, program->app->window, nullptr);
+  if (surface == EGL_NO_SURFACE) {
+    LOGW("cannot eglCreateWindowSurface");
+    return false;
   }
-  gl->display = EGL_NO_DISPLAY;
-  gl->context = EGL_NO_CONTEXT;
-  gl->surface = EGL_NO_SURFACE;
+  program->opengl_es.surface = surface;
+  eglQuerySurface(program->opengl_es.display, surface, EGL_WIDTH, &program->opengl_es.surface_width);
+  eglQuerySurface(program->opengl_es.display, surface, EGL_HEIGHT, &program->opengl_es.surface_height);
+  return true;
+}
+
+static bool init_opengl_es_context(Program* program) {
+  EGLint context_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+  EGLContext context = eglCreateContext(program->opengl_es.display, program->opengl_es.display_config, nullptr, context_attribs);
+  if (!context) {
+    LOGW("cannot eglCreateContext");
+    return false;
+  }
+  program->opengl_es.context = context;
+  return true;
+}
+
+static bool init_opengl_es_everything(Program *program) {
+  auto *gl = &program->opengl_es;
+  if (!init_opengl_es_display(program) ||
+      !init_opengl_es_surface(program) ||
+      !init_opengl_es_context(program) ||
+      eglMakeCurrent(gl->display, gl->surface, gl->surface, gl->context) == EGL_FALSE ||
+      eglSwapBuffers(gl->display, gl->surface) == EGL_FALSE) {
+    return false;
+  }
+  init_opengl_es_shaders(&gl->shaders);
+  init_font_atlas_texture(&program->font);
+  return true;
+}
+
+static bool ensure_opengl_es_is_working(Program *program) {
+  auto *gl = &program->opengl_es;
+  if (gl->display == EGL_NO_DISPLAY) {
+    return init_opengl_es_everything(program);
+  } else {
+    eglMakeCurrent(gl->display, gl->surface, gl->surface, gl->context);
+    if (eglSwapBuffers(gl->display, gl->surface) != EGL_FALSE) {
+      return true;
+    } else {
+      EGLint err = eglGetError();
+      if (err == EGL_BAD_DISPLAY || err == EGL_BAD_CONTEXT || err == EGL_CONTEXT_LOST) {
+        eglDestroyContext(gl->display, gl->context);
+        eglDestroySurface(gl->display, gl->surface);
+        eglTerminate(gl->display);
+        return init_opengl_es_everything(program);
+      } else if (err == EGL_BAD_SURFACE) {
+        eglDestroySurface(gl->display, gl->surface);
+        return init_opengl_es_surface(program) &&
+               eglMakeCurrent(gl->display, gl->surface, gl->surface, gl->context) != EGL_FALSE &&
+               eglSwapBuffers(gl->display, gl->surface) != EGL_FALSE;
+      } else {
+        return false;
+      }
+    }
+  }
 }
 
 static bool show_soft_keyboard(android_app *app, bool show) {
@@ -139,13 +162,14 @@ static void handle_app_cmd(android_app* app, int32 cmd) {
   } break;
   case APP_CMD_INIT_WINDOW: {
     LOGI("received APP_CMD_INIT_WINDOW");
-    init_opengl_es(program);
-    init_opengl_es_shaders(&program->opengl_es.shaders);
-    init_font_atlas_texture(&program->font);
+    if (!ensure_opengl_es_is_working(program)) {
+      LOGF("opengl es cannot be initialized or restored");
+      exit(1);
+    }
+    render_font_atlas(program);
   } break;
   case APP_CMD_TERM_WINDOW: {
     LOGI("received APP_CMD_TERM_WINDOW");
-    shutdown_opengl_es(program);
   } break;
   case APP_CMD_WINDOW_RESIZED: {
     LOGI("received APP_CMD_WINDOW_RESIZED");
@@ -272,13 +296,12 @@ static int32 handle_app_input(android_app* app, AInputEvent* event) {
 
 void android_main(android_app* app) {
   app_dummy(); // app crashes without this, wtf?
-
   Program *program = CALLOC(Program, 1);
   program->app = app;
+  program->opengl_es.display = EGL_NO_DISPLAY;
   app->userData = program;
   app->onAppCmd = handle_app_cmd;
   app->onInputEvent = handle_app_input;
-
   { // load font
     AAsset *asset = AAssetManager_open(app->activity->assetManager, "fonts/open-sans/OpenSans-Regular.ttf", AASSET_MODE_STREAMING);
     if (!asset) {
@@ -296,7 +319,6 @@ void android_main(android_app* app) {
       return;
     }
   }
-
   { // event loop
     android_poll_source* source;
     while (ALooper_pollAll(-1, nullptr, nullptr, (void**)&source) >= 0) {
@@ -304,11 +326,9 @@ void android_main(android_app* app) {
         source->process(app, source);
       }
       if (app->destroyRequested) {
-        shutdown_opengl_es(program);
         break;
       }
     }
   }
-
   return;
 }

@@ -318,6 +318,7 @@ struct Program { // root data structure of the entire program
   struct OpenGLES {
 #ifdef __ANDROID__
     EGLDisplay display;
+    EGLConfig display_config;
     EGLSurface surface;
     EGLContext context;
 #endif
@@ -598,7 +599,7 @@ static void render_font_atlas(Program *program) {
   int dh = (program->opengl_es.surface_height - program->opengl_es.surface_width) / 2;
   glViewport(0, dh, program->opengl_es.surface_width, program->opengl_es.surface_width);
   glDrawArrays(GL_TRIANGLES, 0, 6);
-//  gl_swap_buffers(program);
+  gl_swap_buffers(&program->opengl_es);
   glDisableVertexAttribArray(shader->attrib_position);
   glDisableVertexAttribArray(shader->attrib_color);
   glDisableVertexAttribArray(shader->attrib_tcoord);

@@ -26,15 +26,16 @@ static Program *program = CALLOC(Program, 1);
 
 @interface KeyboardView : UIView <UIKeyInput>
 @end
-
 @implementation KeyboardView
 - (void)insertText:(NSString *)text {
-  // Do something with the typed character
-  NSLog(@"%@", text);
+  int c_str_len = (int)text.length;
+  const char *c_str = text.UTF8String;
+  for (int i = 0; i < c_str_len; ++i) {
+    add_char_to_on_screen_text_verts_buf(program, c_str[i]);
+  }
+  render_on_screen_text(program);
 }
 - (void)deleteBackward {
-  // Handle the delete key
-  NSLog(@"delete backward");
 }
 - (BOOL)hasText {
   return YES;
@@ -49,13 +50,11 @@ static Program *program = CALLOC(Program, 1);
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event;
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event;
 @end
-
 @implementation OpenGLView
 - (void)drawRect:(CGRect)rect {
   program->opengl_es.surface_width = (int)self.drawableWidth;
   program->opengl_es.surface_height = (int)self.drawableHeight;
   render_font_atlas(program);
-  LOGI("draw rect");
 }
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
   static bool show = false;
@@ -75,7 +74,6 @@ static Program *program = CALLOC(Program, 1);
 - (void)loadView;
 - (void)viewDidLoad;
 @end
-
 @implementation OpenGLViewController
 - (void)loadView {
   EAGLContext *context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
@@ -96,19 +94,15 @@ static Program *program = CALLOC(Program, 1);
   NSInteger font_ns_data_len = [font_ns_data length];
   byte *font_data = MALLOC(byte, (int)font_ns_data_len);
   memcpy(font_data, [font_ns_data bytes], font_ns_data_len);
-  if (!init_font_data(&program->font, font_data)) {
-    exit(1);
-  }
+  init_font_data(&program->font, font_data);
   init_opengl_es_shaders(&program->opengl_es.shaders);
   init_font_atlas_texture(&program->font);
-  LOGI("view did load");
 }
 @end
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @property (strong, nonatomic) UIWindow *window;
 @end
-
 @implementation AppDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
   CGRect screenBounds = [[UIScreen mainScreen] bounds];
@@ -120,32 +114,26 @@ static Program *program = CALLOC(Program, 1);
   LOGI("didFinishLaunchingWithOptions");
   return YES;
 }
-
 - (void)applicationDidBecomeActive:(UIApplication *)application {
-  // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+  render_font_atlas(program);
+  str_set_c(&program->on_screen_text.text, "");
+  program->on_screen_text.gl_verts_buf_size_in_use = 0;
+  int ascent;
+  stbtt_GetFontVMetrics(&program->font.info, &ascent, nullptr, nullptr);
+  program->on_screen_text.pen_pos_x = 0;
+  program->on_screen_text.pen_pos_y = ascent * program->font.scale_factor + 250;
   LOGI("applicationDidBecomeActive");
 }
-
 - (void)applicationWillResignActive:(UIApplication *)application {
-  // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-  // Use this method to pause ongoing tasks, disable timers, and throttle down OpenGL ES frame rates. Games should use this method to pause the game.
   LOGI("applicationWillResignActive");
 }
-
 - (void)applicationDidEnterBackground:(UIApplication *)application {
-  // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-  // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
   LOGI("applicationDidEnterBackground");
 }
-
 - (void)applicationWillEnterForeground:(UIApplication *)application {
-  // Called as part of the transition from the background to the inactive state; here you can undo many of the changes made on entering the background.
   LOGI("applicationWillEnterForeground");
 }
-
-
 - (void)applicationWillTerminate:(UIApplication *)application {
-  // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
   LOGI("applicationWillTerminate");
 }
 @end
