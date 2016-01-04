@@ -1,0 +1,14 @@
+android/*.apk
+android/*.ap_
+android/*.dex
+android/*.class
+android/bin/
+android/gen/
+android/local.properties
+android/proguard/
+android/*.log
+android/.navigation/
+android/captures/
+android/obj/
+android/libs/
+*.DS_Store
