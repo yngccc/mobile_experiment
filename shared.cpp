@@ -1,24 +1,18 @@
-/* The MIT License (MIT)
+/* Copyright (C) 2015-2016 yang chen yngccc@gmail.com
 
-   Copyright (c) <2015-2016> <Yang Chen> <yngccc@gmail.com>
+   This program is free software; you can redistribute it and/or
+   modify it under the terms of the GNU General Public License
+   as published by the Free Software Foundation; either version 2
+   of the License, or (at your option) any later version.
 
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE. */
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA. */
 
 #ifdef __ANDROID__
 #include <jni.h>
@@ -34,10 +28,11 @@
 #include <android/asset_manager_jni.h>
 #include <android_native_app_glue.h>
 
-#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, "my_activity", __VA_ARGS__))
-#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, "my_activity", __VA_ARGS__))
-#define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, "my_activity", __VA_ARGS__))
-#define LOGF(...) ((void)__android_log_print(ANDROID_LOG_FATAL, "my_activity", __VA_ARGS__))
+#define LOGD(...) ((void)__android_log_print(ANDROID_LOG_DEBUG, "yngccc", __VA_ARGS__))
+#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, "yngccc", __VA_ARGS__))
+#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, "yngccc", __VA_ARGS__))
+#define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, "yngccc", __VA_ARGS__))
+#define LOGF(...) ((void)__android_log_print(ANDROID_LOG_FATAL, "yngccc", __VA_ARGS__))
 #endif
 
 #ifdef __APPLE__
@@ -46,11 +41,22 @@
 #import <OpenGLES/ES3/gl.h>
 #import <OpenGLES/ES3/glext.h>
 
+#define LOGD(...) (fprintf(stderr, __VA_ARGS__), fprintf(stderr, "\n"))
 #define LOGI(...) (fprintf(stderr, __VA_ARGS__), fprintf(stderr, "\n"))
 #define LOGW(...) (fprintf(stderr, __VA_ARGS__), fprintf(stderr, "\n"))
 #define LOGE(...) (fprintf(stderr, __VA_ARGS__), fprintf(stderr, "\n"))
 #define LOGF(...) (fprintf(stderr, __VA_ARGS__), fprintf(stderr, "\n"))
 #endif
+
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <pthread.h>
+#include <fcntl.h>
+#include <stdatomic.h>
 
 #define STB_RECT_PACK_IMPLEMENTATION
 #include "stb_rect_pack.h"
@@ -58,6 +64,9 @@
 #include "stb_truetype.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+
+#define HTTP_PARSER_IMPLEMENTATION
+#include "http_parser.h"
 
 typedef int16_t int16;
 typedef uint16_t uint16;
@@ -126,20 +135,20 @@ T min(T a, T b) {
 
 namespace { // simple dynamic string
 #define STRING_INIT_CAPACITY 64u
-#define STRING_GROWTH_FACTOR 2
+#define STRING_GROWTH_FACTOR 2u
 
 struct StringHeader {
   uint32 len;
   uint32 free;
 };
 
-static void delete_str(char *str) {
+void delete_str(char *str) {
   if (str) {
     FREE(str - sizeof(StringHeader));
   }
 }
 
-static uint32 str_len(const char *str) {
+uint32 str_len(const char *str) {
   if (str) {
     return ((StringHeader *)(str) - 1)->len;
   } else {
@@ -147,7 +156,7 @@ static uint32 str_len(const char *str) {
   }
 }
 
-static int str_cmp_impl(const char *str1, const char *str2, uint32 str2_len) {
+int str_cmp_impl(const char *str1, const char *str2, uint32 str2_len) {
   uint32 str1_len = str_len(str1);
   if (str1_len != str2_len) {
     return str1_len > str2_len ? 1 : -1;
@@ -156,15 +165,15 @@ static int str_cmp_impl(const char *str1, const char *str2, uint32 str2_len) {
   }
 }
 
-static int str_cmp(const char *str1, const char *str2) {
+int str_cmp(const char *str1, const char *str2) {
   return str_cmp_impl(str1, str2, str_len(str2));
 }
 
-static int str_cmp_c(const char *str1, const char *str2) {
+int str_cmp_c(const char *str1, const char *str2) {
   return str_cmp_impl(str1, str2, strlen(str2));
 }
 
-static void str_set_impl(char **str1, const char *str2, uint32 str2_len) {
+void str_set_impl(char **str1, const char *str2, uint32 str2_len) {
   assert(str1);
   if (!*str1) {
     uint32 size = max((uint32)((sizeof(StringHeader) + str2_len + 1) * STRING_GROWTH_FACTOR), STRING_INIT_CAPACITY);
@@ -191,15 +200,15 @@ static void str_set_impl(char **str1, const char *str2, uint32 str2_len) {
   }
 }
 
-static void str_set(char **str1, const char *str2) {
+void str_set(char **str1, const char *str2) {
   str_set_impl(str1, str2, str_len(str2));
 }
 
-static void str_set_c(char **str1, const char *str2) {
+void str_set_c(char **str1, const char *str2) {
   str_set_impl(str1, str2, strlen(str2));
 }
 
-static char* str_dup(const char *str) {
+char* str_dup(const char *str) {
   if (str) {
     char *new_str = nullptr;
     str_set(&new_str, str);
@@ -209,7 +218,7 @@ static char* str_dup(const char *str) {
   }
 }
 
-static char* str_dup_c(const char *str) {
+char* str_dup_c(const char *str) {
   if (str) {
     char *new_str = nullptr;
     str_set_c(&new_str, str);
@@ -219,7 +228,7 @@ static char* str_dup_c(const char *str) {
   }
 }
 
-static void str_cat(char **str, char c) {
+void str_cat(char **str, char c) {
   assert(str);
   if (!*str) {
     uint32 size = STRING_INIT_CAPACITY;
@@ -244,7 +253,7 @@ static void str_cat(char **str, char c) {
   }
 }
 
-static void str_cat_impl(char **str1, const char *str2, uint32 str2_len) {
+void str_cat_impl(char **str1, const char *str2, uint32 str2_len) {
   assert(str1);
   if (!*str1) {
     uint32 size = max((uint32)((sizeof(StringHeader) + str2_len + 1) * STRING_GROWTH_FACTOR), STRING_INIT_CAPACITY);
@@ -267,15 +276,15 @@ static void str_cat_impl(char **str1, const char *str2, uint32 str2_len) {
   }
 }
 
-static void str_cat(char **str1, const char *str2) {
+void str_cat(char **str1, const char *str2) {
   str_cat_impl(str1, str2, str_len(str2));
 }
 
-static void str_cat_c(char **str1, const char *str2) {
+void str_cat_c(char **str1, const char *str2) {
   str_cat_impl(str1, str2, strlen(str2));
 }
 
-static void str_pop(char *str, uint32 n) {
+void str_pop(char *str, uint32 n) {
   assert(str);
   StringHeader *header = (StringHeader *)(str) - 1;
   assert(header->len >= n);
@@ -284,7 +293,7 @@ static void str_pop(char *str, uint32 n) {
   str[header->len] = '\0';
 }
 
-static void str_pop_to_char(char *str, char c) {
+void str_pop_to_char(char *str, char c) {
   assert(str);
   StringHeader *header = (StringHeader *)(str) - 1;
   if (header->len > 1) {
@@ -301,7 +310,7 @@ static void str_pop_to_char(char *str, char c) {
   }
 }
 
-static void str_replace(char *str, char a, char b) {
+void str_replace(char *str, char a, char b) {
   uint32 len = str_len(str);
   for (int i = 0; i < len; ++i) {
     if (str[i] == a) {
@@ -311,17 +320,219 @@ static void str_replace(char *str, char a, char b) {
 }
 } // simple dynamic string
 
+namespace { // simple dynamic array
+#define ARRAY_INIT_CAPACITY 64u
+#define ARRAY_GROWTH_FACTOR 2u
+
+struct ArrayHeader {
+  uint32 size;
+  uint32 free;
+};
+
+template <typename T>
+void delete_array(T *array) {
+  if (array) {
+    FREE((char *)array - sizeof(ArrayHeader));
+  }
+}
+
+template <typename T>
+uint32 array_size(const T *array) {
+  if (array) {
+    ArrayHeader *header = (ArrayHeader *)((char *)array - sizeof(ArrayHeader));
+    return header->size;
+  } else {
+    return 0;
+  }
+}
+
+template <typename T>
+ArrayHeader *array_header(const T *array) {
+  assert(array);
+  ArrayHeader *header = (ArrayHeader *)((char *)array - sizeof(ArrayHeader));
+  return header;
+}
+
+template <typename T>
+T array_last(const T *array) {
+  uint32 size = array_size(array);
+  assert(size > 0);
+  return array[size - 1];
+}
+
+template <typename T>
+void array_reserve(T **array, uint32 num_items) {
+  assert(array);
+  if (!*array) {
+    char *new_array = MALLOC(char, sizeof(ArrayHeader) + num_items * sizeof(T));
+    ArrayHeader *header = (ArrayHeader *)new_array;
+    header->size = 0;
+    header->free = num_items;
+    *array = (T *)(new_array + sizeof(ArrayHeader));
+  } else {
+    ArrayHeader *header = (ArrayHeader *)((char *)(*array) - sizeof(ArrayHeader));
+    if ((header->size + header->free) < num_items) {
+      char *new_array = REALLOC(header, char, sizeof(ArrayHeader) + num_items * sizeof(T));
+      header = (ArrayHeader *)new_array;
+      *array = (T *)(new_array + sizeof(ArrayHeader));
+      header->free = num_items - header->size;
+    }
+  }
+}
+
+template <typename T>
+void array_resize(T **array, uint32 new_size) {
+  assert(array);
+  if (!*array) {
+    uint32 capacity = new_size * ARRAY_GROWTH_FACTOR;
+    char *new_array = CALLOC(char, sizeof(ArrayHeader) + capacity * sizeof(T));
+    ArrayHeader *header = (ArrayHeader *)new_array;
+    header->size = new_size;
+    header->free = capacity - new_size;
+    *array = (T *)(new_array + sizeof(ArrayHeader));
+  } else {
+    ArrayHeader *header = (ArrayHeader *)((char *)(*array) - sizeof(ArrayHeader));
+    if (header->size >= new_size) {
+      uint32 diff = header->size - new_size;
+      header->size -= diff;
+      header->free += diff;
+    } else {
+      uint32 capacity = header->size + header->free;
+      if (new_size <= capacity) {
+        uint32 diff = new_size - header->size;
+        header->size += diff;
+        header->free -= diff;
+        memset(*array + (header->size - diff), 0, diff * sizeof(T));
+      } else {
+        uint32 new_capacity = new_size * ARRAY_GROWTH_FACTOR;
+        char *new_array = REALLOC(header, char, sizeof(ArrayHeader) + new_capacity * sizeof(T));
+        header = (ArrayHeader *)new_array;
+        uint32 old_size = header->size;
+        header->size = new_size;
+        header->free = new_capacity - new_size;
+        *array = (T *)(new_array + sizeof(ArrayHeader));
+        memset(*array + old_size, 0, (new_size - old_size) * sizeof(T));
+      }
+    }
+  }
+}
+
+template <typename T>
+void array_set(T *array, T value) {
+  for (uint32 i = 0; i < array_size(array); ++i) {
+    array[i] = value;
+  }
+}
+
+template <typename T>
+void array_push(T **array, const T &item) {
+  assert(array);
+  if (!*array) {
+    char *new_array = MALLOC(char, sizeof(ArrayHeader) + ARRAY_INIT_CAPACITY * sizeof(T));
+    ArrayHeader *header = (ArrayHeader *)new_array;
+    header->size = 1;
+    header->free = ARRAY_INIT_CAPACITY - 1;
+    *(T *)(new_array + sizeof(ArrayHeader)) = item;
+    *array = (T *)(new_array + sizeof(ArrayHeader));
+  } else {
+    ArrayHeader *header = (ArrayHeader *)((char *)(*array) - sizeof(ArrayHeader));
+    if (header->free == 0) {
+      uint32 new_capacity = header->size * ARRAY_GROWTH_FACTOR;
+      char *new_array = REALLOC(header, char, sizeof(ArrayHeader) + new_capacity * sizeof(T));
+      header = (ArrayHeader *)new_array;
+      header->free = new_capacity - header->size;
+      *array = (T *)(new_array + sizeof(ArrayHeader));
+    }
+    header->size += 1;
+    header->free -= 1;
+    (*array)[header->size - 1] = item;
+  }
+}
+
+template <typename T>
+void array_push(T **array, const T *items, uint32 num_items) {
+  assert(array);
+  if (!*array) {
+    uint32 capacity = max(ARRAY_INIT_CAPACITY, num_items * ARRAY_GROWTH_FACTOR);
+    char *new_array = MALLOC(char, sizeof(ArrayHeader) + capacity * sizeof(T));
+    ArrayHeader *header = (ArrayHeader *)new_array;
+    header->size = num_items;
+    header->free = ARRAY_INIT_CAPACITY - num_items;
+    memcpy(new_array + sizeof(ArrayHeader), items, num_items * sizeof(T));
+    *array = (T *)(new_array + sizeof(ArrayHeader));
+  } else {
+    ArrayHeader *header = (ArrayHeader *)((char *)(*array) - sizeof(ArrayHeader));
+    if (header->free < num_items) {
+      uint32 new_capacity = (header->size + num_items) * ARRAY_GROWTH_FACTOR;
+      char *new_array = REALLOC(header, char, sizeof(ArrayHeader) + new_capacity * sizeof(T));
+      header = (ArrayHeader *)new_array;
+      header->free = new_capacity - header->size;
+      *array = (T *)(new_array + sizeof(ArrayHeader));
+    }
+    header->size += num_items;
+    header->free -= num_items;
+    memcpy((*array) + (header->size - num_items), items, num_items * sizeof(T));
+  }
+}
+
+template <typename T>
+T array_pop(T *array) {
+  assert(array);
+  ArrayHeader *header = (ArrayHeader *)((char *)array - sizeof(ArrayHeader));
+  assert(header->size > 0);
+  header->size -= 1;
+  header->free += 1;
+  return array[header->size];
+}
+
+template <typename T>
+void array_pop(T *array, uint32 num_items, T *items = nullptr) {
+  assert(array);
+  ArrayHeader *header = (ArrayHeader *)((char *)array - sizeof(ArrayHeader));
+  assert(header->size >= num_items);
+  header->size -= num_items;
+  header->free += num_items;
+  if (items) {
+    memcpy(items, array + header->size, num_items * sizeof(T));
+  }
+}
+
+template <typename T>
+void array_clear(T *array) {
+  if (array) {
+    ArrayHeader *header = (ArrayHeader *)((char *)array - sizeof(ArrayHeader));
+    header->free += header->size;
+    header->size = 0;
+  }
+}
+
+template <typename T>
+T array_swap_with_end_then_pop(T *array, uint32 index) {
+  ArrayHeader *header = (ArrayHeader *)((char *)array - sizeof(ArrayHeader));
+  assert(header->size > 0);
+  uint32 end = header->size - 1;
+  assert(index <= end);
+  --header->size;
+  ++header->free;
+  T value = array[index];
+  if (index < end) {
+    array[index] = array[end];
+  }
+  return value;
+}
+} // simple dynamic array
+
 struct Program { // root data structure of the entire program
-#ifdef __ANDROID__
+  #ifdef __ANDROID__
   android_app* app;
-#endif
+  #endif
   struct OpenGLES {
-#ifdef __ANDROID__
+    #ifdef __ANDROID__
     EGLDisplay display;
     EGLConfig display_config;
     EGLSurface surface;
     EGLContext context;
-#endif
+    #endif
     int surface_width;
     int surface_height;
     struct Shaders {
@@ -338,12 +549,12 @@ struct Program { // root data structure of the entire program
   struct Font {
     stbtt_fontinfo info;
     float scale_factor;
+    stbtt_packedchar *packed_chars; // currently always ascii 32 to 126
+    int num_packed_chars;
     byte *atlas;
     int atlas_w;
     int atlas_h;
-    stbtt_packedchar *packed_chars; // currently always ascii 32 to 126
-    int num_packed_chars;
-    GLuint gl_texture_id;
+    GLuint atlas_gl_texture_id;
   } font;
   struct KeyboardState {
     bool shift_on;
@@ -356,19 +567,39 @@ struct Program { // root data structure of the entire program
     float pen_pos_x;
     float pen_pos_y;
   } on_screen_text;
+  struct Network {
+    int dns_lookup_pipe[2];
+    struct DNSLookup {
+      _Atomic int status; // 0:not started, 1:start failed 2:in progress, 3:succeed, 4:failed
+      int write_pipe;
+      const char *domain_name;
+      const char *service;
+      addrinfo request;
+      addrinfo *response;
+      DNSLookup *next;
+    } *dns_lookups;
+    struct ConnectionAttempt {
+      int socket_fd;
+      const char *domain_name;
+      addrinfo *addr_list;
+      addrinfo *cur_addr;
+    } *connection_attempts;
+    struct Connection {
+      int socket_fd;
+      const char *domain_name;
+    } *connections;
+  } network;
 };
 
-static void gl_swap_buffers(Program::OpenGLES *opengl_es) {
-#ifdef __ANDROID__
+void gl_swap_buffers(Program::OpenGLES *opengl_es) {
+  #ifdef __APPLE__
+  [[EAGLContext currentContext] presentRenderbuffer:GL_RENDERBUFFER];
+  #else
   eglSwapBuffers(opengl_es->display, opengl_es->surface);
-#endif
-#ifdef __APPLE__
-  EAGLContext* context = [EAGLContext currentContext];
-  [context presentRenderbuffer:GL_RENDERBUFFER];
-#endif
+  #endif
 }
 
-static void init_opengl_es_shaders(Program::OpenGLES::Shaders *shaders) {
+void init_opengl_es_shaders(Program::OpenGLES::Shaders *shaders) {
   struct ProgramSrc {
     const char *vert_shader;
     int vert_shader_len;
@@ -487,7 +718,7 @@ static void init_opengl_es_shaders(Program::OpenGLES::Shaders *shaders) {
   }
 }
 
-static bool init_font_data(Program::Font *font, byte *font_buf) {
+bool init_font(Program::Font *font, byte *font_buf) {
   if (!stbtt_InitFont(&font->info, font_buf, 0)) {
     LOGF("cannot init font info from font file");
     return false;
@@ -515,14 +746,14 @@ static bool init_font_data(Program::Font *font, byte *font_buf) {
   return true;
 }
 
-static void init_font_atlas_texture(Program::Font *font) {
-  glGenTextures(1, &font->gl_texture_id);
-  glBindTexture(GL_TEXTURE_2D, font->gl_texture_id);
+void init_font_atlas_texture(Program::Font *font) {
+  glGenTextures(1, &font->atlas_gl_texture_id);
+  glBindTexture(GL_TEXTURE_2D, font->atlas_gl_texture_id);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, font->atlas_w, font->atlas_h, 0, GL_ALPHA, GL_UNSIGNED_BYTE, font->atlas);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 }
 
-static void add_char_to_on_screen_text_verts_buf(Program *program, char c) {
+void add_char_to_on_screen_text_verts_buf(Program *program, char c) {
   auto *text = &program->on_screen_text;
   if (text->gl_verts_buf_id == 0) {
     glGenBuffers(1, &text->gl_verts_buf_id);
@@ -543,7 +774,7 @@ static void add_char_to_on_screen_text_verts_buf(Program *program, char c) {
     glDeleteBuffers(1, &text->gl_verts_buf_id);
     text->gl_verts_buf_id = new_buf;
     text->gl_verts_buf_size = new_size;
-    LOGI("new size %d", text->gl_verts_buf_size);
+    LOGI("on screen text verts buf new size %d", text->gl_verts_buf_size);
   }
   auto *font_data = &program->font;
   int ascent, descent, line_gap;
@@ -568,14 +799,14 @@ static void add_char_to_on_screen_text_verts_buf(Program *program, char c) {
   text->gl_verts_buf_size_in_use += c_size;
 }
 
-static void render_font_atlas(Program *program) {
+void render_font_atlas(Program *program) {
   auto *font = &program->font;
   auto *shader = &program->opengl_es.shaders.text;
   glUseProgram(shader->id);
   ORTHO_PROJECTION_MAT(ortho_mat, -1, 1, 1, -1, -1, 1);
   glUniformMatrix4fv(shader->uniform_mvp_mat, 1, GL_FALSE, ortho_mat);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, font->gl_texture_id);
+  glBindTexture(GL_TEXTURE_2D, font->atlas_gl_texture_id);
   glUniform1i(shader->uniform_tex, 0);
 
   QUAD_VERTS_XYZ_RGBA_ST(verts_buf, -1, -1, 0, 2, 2, 0, 1, 0, 1, 0, 0, 1, 1);
@@ -606,7 +837,7 @@ static void render_font_atlas(Program *program) {
   glDisable(GL_BLEND);
 }
 
-static void render_on_screen_text(Program *program) {
+void render_on_screen_text(Program *program) {
   auto *font = &program->font;
   auto *text = &program->on_screen_text;
   auto *shader = &program->opengl_es.shaders.text;
@@ -616,7 +847,7 @@ static void render_on_screen_text(Program *program) {
   ORTHO_PROJECTION_MAT(ortho_mat, 0, (float)width, (float)height, 0, -1, 1);
   glUniformMatrix4fv(shader->uniform_mvp_mat, 1, GL_FALSE, ortho_mat);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, font->gl_texture_id);
+  glBindTexture(GL_TEXTURE_2D, font->atlas_gl_texture_id);
   glUniform1i(shader->uniform_tex, 0);
 
   glBindBuffer(GL_ARRAY_BUFFER, text->gl_verts_buf_id);
@@ -641,3 +872,172 @@ static void render_on_screen_text(Program *program) {
   glDisableVertexAttribArray(shader->attrib_tcoord);
   glDisable(GL_BLEND);
 }
+
+void *dns_lookup_proc(void *user_data) {
+  auto *lookup = (Program::Network::DNSLookup *)user_data;
+  assert(atomic_load(&lookup->status) == 0);
+  atomic_store(&lookup->status, 2);
+  int err = getaddrinfo(lookup->domain_name, lookup->service, &lookup->request, &lookup->response);
+  if (err == 0) {
+    atomic_store(&lookup->status, 3);
+  } else {
+    atomic_store(&lookup->status, 4);
+  }
+  write(lookup->write_pipe, &lookup, sizeof(void*));
+  return nullptr;
+}
+
+void dns_lookup(Program::Network *network, Program::Network::DNSLookup *lookups) {
+  Program::Network::DNSLookup *lookup = lookups;
+  while (lookup) {
+    atomic_store(&lookup->status, 0);
+    pthread_t thread;
+    if (pthread_create(&thread, nullptr, dns_lookup_proc, lookup)) {
+      atomic_store(&lookup->status, 1);
+    }
+    pthread_detach(thread);
+    lookup = lookup->next;
+  }
+  if (!network->dns_lookups) {
+    network->dns_lookups = lookups;
+  } else {
+    Program::Network::DNSLookup *lookup = network->dns_lookups;
+    while (lookup->next) {
+      lookup = lookup->next;
+    }
+    lookup->next = lookups;
+  }
+}
+
+void finish_connection_attempt(Program *program, int attempt_index);
+int connection_getopt_callback(int fd, int events, void* data);
+int connection_read_write_callback(int fd, int events, void* data);
+
+#ifdef __ANDROID__
+
+void start_connection_attempt(Program *program, int attempt_index) {
+  ALooper *alooper = program->app->looper;
+  Program::Network *network = &program->network;
+  Program::Network::ConnectionAttempt *ca = &network->connection_attempts[attempt_index];
+  ALooper_removeFd(alooper, ca->socket_fd);
+  close(ca->socket_fd);
+  while (ca->cur_addr) {
+    LOGD("trying create socket with addr, domain name %s", ca->domain_name);
+    int socket_fd = socket(ca->cur_addr->ai_family, ca->cur_addr->ai_socktype, ca->cur_addr->ai_protocol);
+    if (socket_fd != -1 && fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) & ~O_NONBLOCK) != -1) {
+      LOGD("successful create socket with addr, domain name %s", ca->domain_name);
+      ca->socket_fd = socket_fd;
+      break;
+    }
+    LOGD("failure create socket with addr, domain name %s", ca->domain_name);
+    close(socket_fd);
+    ca->cur_addr = ca->cur_addr->ai_next;
+  }
+  if (!ca->cur_addr) {
+    LOGD("cannot create socket, domain name %s", ca->domain_name);
+    freeaddrinfo(ca->addr_list);
+    array_swap_with_end_then_pop(network->connection_attempts, attempt_index);
+  } else {
+    int err = connect(ca->socket_fd, ca->cur_addr->ai_addr, ca->cur_addr->ai_addrlen);
+    if (!err) {
+      LOGD("socket connected, domain name %s", ca->domain_name);
+      finish_connection_attempt(program, attempt_index);
+    } else if (errno == EINPROGRESS) {
+      LOGD("socket connect in progress, domain name %s", ca->domain_name);
+      ALooper_addFd(alooper, ca->socket_fd, 0, ALOOPER_EVENT_OUTPUT, connection_getopt_callback, program);
+    } else {
+      LOGD("oops unhandled socket error(%d)", err);
+      exit(1);
+    }
+  }
+}
+
+void finish_connection_attempt(Program *program, int attempt_index) {
+  ALooper *alooper = program->app->looper;
+  Program::Network::ConnectionAttempt *ca = &program->network.connection_attempts[attempt_index];
+  Program::Network::Connection conn = {};
+  conn.socket_fd = ca->socket_fd;
+  conn.domain_name = ca->domain_name;
+  freeaddrinfo(ca->addr_list);
+  array_swap_with_end_then_pop(program->network.connection_attempts, attempt_index);
+  ALooper_addFd(alooper, conn.socket_fd, 0, ALOOPER_EVENT_INPUT | ALOOPER_EVENT_OUTPUT, connection_read_write_callback, program);
+  array_push(&program->network.connections, conn);
+}
+
+int dns_lookup_callback(int fd, int event, void* data) {
+  Program *program = (Program*)data;
+  Program::Network::DNSLookup *lookups[32];
+  int num_bytes = read(fd, lookups, sizeof(lookups));
+  assert(num_bytes % sizeof(void*) == 0);
+  int num_lookups = num_bytes / sizeof(void*);
+  for (int i = 0; i < num_lookups; ++i) {
+    int status = atomic_load(&lookups[i]->status);
+    if (status == 4) {
+      LOGD("cannot lookup dns, domain name: %s", lookups[i]->domain_name);
+    } else if (status == 3) {
+      Program::Network::ConnectionAttempt ca = {};
+      ca.socket_fd = -1;
+      ca.domain_name = lookups[i]->domain_name;
+      ca.addr_list = lookups[i]->response;
+      ca.cur_addr = ca.addr_list;
+      array_push(&program->network.connection_attempts, ca);
+      start_connection_attempt(program, array_size(program->network.connection_attempts) - 1);
+    }
+    // TODO: remove lookups[i] from program->network->dns_lookups
+  }
+  return 1;
+}
+
+int connection_getopt_callback(int fd, int event, void* data) {
+  Program *program = (Program*)data;
+  LOGD("connection getsockopt");
+  int i;
+  for (i = 0; i < array_size(program->network.connection_attempts); ++i) {
+    if (program->network.connection_attempts[i].socket_fd == fd) {
+      break;
+    }
+  }
+  assert(i < array_size(program->network.connection_attempts));
+  Program::Network::ConnectionAttempt ca = program->network.connection_attempts[i];
+  int err;
+  socklen_t err_len = sizeof(err);
+  getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
+  if (!err) {
+    LOGD("connection getsockopt succeed, domain name: %s", ca.domain_name);
+    finish_connection_attempt(program, i);
+  } else {
+    LOGD("connection getsockopt failed, try next addr, domain name: %s", ca.domain_name);
+    ca.cur_addr = ca.cur_addr->ai_next;
+    start_connection_attempt(program, i);
+  }
+  return 1;
+}
+
+int connection_read_write_callback(int fd, int event, void* data) {
+  Program *program = (Program*)data;
+  int i;
+  for (i = 0; i < array_size(program->network.connections); ++i) {
+    if (program->network.connections[i].socket_fd == fd) {
+      break;
+    }
+  }
+  assert(i < array_size(program->network.connections));
+  Program::Network::Connection conn = program->network.connections[i];
+  if (event == ALOOPER_EVENT_INPUT) {
+    char response[2048];
+    int n = read(conn.socket_fd, response, sizeof(response));
+    response[n - 1] = '\0';
+    LOGI("\n>>>>>>>>>>>>>%s<<<<<<<<<<<<<<<<\n%s", conn.domain_name, response);
+    ALooper_removeFd(program->app->looper, conn.socket_fd);
+    close(conn.socket_fd);
+    array_swap_with_end_then_pop(program->network.connections, i);
+  } else if (event == ALOOPER_EVENT_OUTPUT) {
+    char request[256];
+    snprintf(request, sizeof(request), "GET / HTTP/1.1\r\nHost: %s\r\n\r\n", conn.domain_name);
+    int n = write(conn.socket_fd, request, strlen(request));
+    ALooper_addFd(program->app->looper, conn.socket_fd, 0, ALOOPER_EVENT_INPUT, connection_read_write_callback, program);
+  }
+  return 1;
+}
+
+#endif // __ANDROID__

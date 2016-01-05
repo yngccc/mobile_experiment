@@ -12,3 +12,4 @@ android/captures/
 android/obj/
 android/libs/
 *.DS_Store
+ios/project.xcodeproj/project.xcworkspace/xcuserdata/*

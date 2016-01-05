@@ -1,28 +1,22 @@
-/* The MIT License (MIT)
+/* Copyright (C) 2015-2016 yang chen yngccc@gmail.com
 
-   Copyright (c) <2015-2016> <Yang Chen> <yngccc@gmail.com>
+   This program is free software; you can redistribute it and/or
+   modify it under the terms of the GNU General Public License
+   as published by the Free Software Foundation; either version 2
+   of the License, or (at your option) any later version.
 
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA. */
 
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE. */
+#include "shared.cpp"
 
-#include "../../shared.cpp"
-
-static bool init_opengl_es_display(Program *program) {
+bool init_opengl_es_display(Program *program) {
   EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
   if (display == EGL_NO_DISPLAY) {
     LOGW("cannot eglGetDisplay");
@@ -44,7 +38,7 @@ static bool init_opengl_es_display(Program *program) {
   return true;
 }
 
-static bool init_opengl_es_surface(Program* program) {
+bool init_opengl_es_surface(Program* program) {
   EGLSurface surface = eglCreateWindowSurface(program->opengl_es.display, program->opengl_es.display_config, program->app->window, nullptr);
   if (surface == EGL_NO_SURFACE) {
     LOGW("cannot eglCreateWindowSurface");
@@ -56,7 +50,7 @@ static bool init_opengl_es_surface(Program* program) {
   return true;
 }
 
-static bool init_opengl_es_context(Program* program) {
+bool init_opengl_es_context(Program* program) {
   EGLint context_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
   EGLContext context = eglCreateContext(program->opengl_es.display, program->opengl_es.display_config, nullptr, context_attribs);
   if (!context) {
@@ -67,7 +61,7 @@ static bool init_opengl_es_context(Program* program) {
   return true;
 }
 
-static bool init_opengl_es_everything(Program *program) {
+bool init_opengl_es_everything(Program *program) {
   auto *gl = &program->opengl_es;
   if (!init_opengl_es_display(program) ||
       !init_opengl_es_surface(program) ||
@@ -81,7 +75,7 @@ static bool init_opengl_es_everything(Program *program) {
   return true;
 }
 
-static bool ensure_opengl_es_is_working(Program *program) {
+bool ensure_opengl_es_is_working(Program *program) {
   auto *gl = &program->opengl_es;
   if (gl->display == EGL_NO_DISPLAY) {
     return init_opengl_es_everything(program);
@@ -108,7 +102,7 @@ static bool ensure_opengl_es_is_working(Program *program) {
   }
 }
 
-static bool show_soft_keyboard(android_app *app, bool show) {
+bool show_soft_keyboard(android_app *app, bool show) {
   // Java version
   //
   // InputMethodManager input_method = native_activity.getSystemService(Context.INPUT_METHOD_SERVICE)
@@ -154,14 +148,14 @@ static bool show_soft_keyboard(android_app *app, bool show) {
   }
 }
 
-static void handle_app_cmd(android_app* app, int32 cmd) {
+void handle_app_cmd(android_app* app, int32 cmd) {
   Program* program = (Program*)app->userData;
   switch (cmd) {
   case APP_CMD_INPUT_CHANGED: {
-    LOGI("received APP_CMD_INPUT_CHANGED");
+    LOGD("received APP_CMD_INPUT_CHANGED");
   } break;
   case APP_CMD_INIT_WINDOW: {
-    LOGI("received APP_CMD_INIT_WINDOW");
+    LOGD("received APP_CMD_INIT_WINDOW");
     if (!ensure_opengl_es_is_working(program)) {
       LOGF("opengl es cannot be initialized or restored");
       exit(1);
@@ -169,57 +163,57 @@ static void handle_app_cmd(android_app* app, int32 cmd) {
     render_font_atlas(program);
   } break;
   case APP_CMD_TERM_WINDOW: {
-    LOGI("received APP_CMD_TERM_WINDOW");
+    LOGD("received APP_CMD_TERM_WINDOW");
   } break;
   case APP_CMD_WINDOW_RESIZED: {
-    LOGI("received APP_CMD_WINDOW_RESIZED");
+    LOGD("received APP_CMD_WINDOW_RESIZED");
   } break;
   case APP_CMD_WINDOW_REDRAW_NEEDED: {
-    LOGI("received APP_CMD_WINDOW_REDRAW_NEEDED");
+    LOGD("received APP_CMD_WINDOW_REDRAW_NEEDED");
   } break;
   case APP_CMD_CONTENT_RECT_CHANGED: {
-    LOGI("received APP_CMD_CONTENT_RECT_CHANGED");
+    LOGD("received APP_CMD_CONTENT_RECT_CHANGED");
   } break;
   case APP_CMD_GAINED_FOCUS: {
-    LOGI("received APP_CMD_GAINED_FOCUS");
+    LOGD("received APP_CMD_GAINED_FOCUS");
   } break;
   case APP_CMD_LOST_FOCUS: {
-    LOGI("received APP_CMD_LOST_FOCUS");
+    LOGD("received APP_CMD_LOST_FOCUS");
   } break;
   case APP_CMD_CONFIG_CHANGED: {
-    LOGI("received APP_CMD_CONFIG_CHANGED");
+    LOGD("received APP_CMD_CONFIG_CHANGED");
   } break;
   case APP_CMD_LOW_MEMORY: {
-    LOGI("received APP_CMD_LOW_MEMORY");
+    LOGD("received APP_CMD_LOW_MEMORY");
   } break;
   case APP_CMD_START: {
     program->keyboard_state.shift_on = false;
     int ascent;
     stbtt_GetFontVMetrics(&program->font.info, &ascent, nullptr, nullptr);
     program->on_screen_text.pen_pos_y = ascent * program->font.scale_factor + 250;
-    LOGI("received APP_CMD_START");
+    LOGD("received APP_CMD_START");
   } break;
   case APP_CMD_RESUME: {
-    LOGI("received APP_CMD_RESUME");
+    LOGD("received APP_CMD_RESUME");
   } break;
   case APP_CMD_SAVE_STATE: {
-    LOGI("received APP_CMD_SAVE_STATE");
+    LOGD("received APP_CMD_SAVE_STATE");
   } break;
   case APP_CMD_PAUSE: {
-    LOGI("received APP_CMD_PAUSE");
+    LOGD("received APP_CMD_PAUSE");
   } break;
   case APP_CMD_STOP: {
     delete_str(program->on_screen_text.text);
     program->on_screen_text = {};
-    LOGI("received APP_CMD_STOP");
+    LOGD("received APP_CMD_STOP");
   } break;
   case APP_CMD_DESTROY: {
-    LOGI("received APP_CMD_DESTROY");
+    LOGD("received APP_CMD_DESTROY");
   } break;
   }
 }
 
-static char translate_keycode(int android_keycode, bool shift_on) {
+char translate_keycode(int android_keycode, bool shift_on) {
   struct AlphabetKeymap {
     int32 android_key_code;
     int32 key;
@@ -257,7 +251,7 @@ static char translate_keycode(int android_keycode, bool shift_on) {
   return 0;
 }
 
-static int32 handle_app_input(android_app* app, AInputEvent* event) {
+int32 handle_app_input(android_app* app, AInputEvent* event) {
   Program* program = (Program*)app->userData;
   if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_KEY) {
     int action = AKeyEvent_getAction(event);
@@ -279,7 +273,7 @@ static int32 handle_app_input(android_app* app, AInputEvent* event) {
         }
       }
     } else if (action == AKEY_EVENT_ACTION_MULTIPLE) {
-      LOGI("key multiple %d", keycode);
+      LOGD("key multiple %d", keycode);
     }
   } else if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_MOTION) {
     if (AMotionEvent_getAction(event) == AMOTION_EVENT_ACTION_DOWN) {
@@ -315,19 +309,57 @@ void android_main(android_app* app) {
       LOGF("cannot read font file");
       return;
     }
-    if (!init_font_data(&program->font, buf)) {
+    if (!init_font(&program->font, buf)) {
       return;
     }
   }
-  { // event loop
+  {
+    if (pipe(program->network.dns_lookup_pipe) == -1) {
+      LOGD("cannot create dns lookup pipe");
+      return;
+    }
+    ALooper_addFd(app->looper, program->network.dns_lookup_pipe[0], 0, ALOOPER_EVENT_INPUT, dns_lookup_callback, program);
+    Program::Network::DNSLookup *lookups[10];
+    for (int i = 0; i < 10; ++i) {
+      lookups[i] = MALLOC(Program::Network::DNSLookup, 1);
+      lookups[i]->write_pipe = program->network.dns_lookup_pipe[1];
+      lookups[i]->service = "80";
+      lookups[i]->request = {};
+      lookups[i]->request.ai_family = AF_UNSPEC;
+      lookups[i]->request.ai_socktype = SOCK_STREAM;
+      lookups[i]->request.ai_protocol = IPPROTO_TCP;
+      lookups[i]->request.ai_flags = AI_ADDRCONFIG;
+    }
+    for (int i = 0; i < 9; ++i) {
+      lookups[i]->next = lookups[i + 1];
+    }
+    lookups[9]->next = nullptr;
+    lookups[0]->domain_name = "www.google.com";
+    lookups[1]->domain_name = "www.facebook.com";
+    lookups[2]->domain_name = "www.youtube.com";
+    lookups[3]->domain_name = "www.baidu.com";
+    lookups[4]->domain_name = "www.yahoo.com";
+    lookups[5]->domain_name = "www.amazon.com";
+    lookups[6]->domain_name = "www.wikipedia.org";
+    lookups[7]->domain_name = "www.qq.com";
+    lookups[8]->domain_name = "www.twitter.com";
+    lookups[9]->domain_name = "www.taobao.com";
+    dns_lookup(&program->network, lookups[0]);
+  }
+  for (;;) { // event loop
+    int fd;
+    int event;
     android_poll_source* source;
-    while (ALooper_pollAll(-1, nullptr, nullptr, (void**)&source) >= 0) {
-      if (source) {
-        source->process(app, source);
-      }
+    int fd_type = ALooper_pollAll(-1, &fd, &event, (void**)&source);
+    if (fd_type >= 0) {
       if (app->destroyRequested) {
         break;
       }
+      if (source) {
+        source->process(app, source);
+      }
+    } else if (fd_type == ALOOPER_POLL_TIMEOUT) {
+      LOGD("time out: %d", fd_type);
     }
   }
   return;
